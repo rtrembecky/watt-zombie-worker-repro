@@ -73,23 +73,31 @@ The same harness with `CHILD_SCRIPT=child-v8-fatal.js NODE_FLAGS="--max-old-spac
 [parent-fixed] >>> worker.exit FIRED with code=1. Watt would restart NOW (within ~1s of the crash). <<<
 ```
 
-## Proposed fix
+## Suggested direction
+
+Reading `signal` and propagating signal-class deaths as a non-zero exit would close the gap (matches the existing comment *"terminate the thread with the same code"*). For example:
 
 ```diff
-  // If the process exits prematurely, terminate the thread with the same code
 - this.subprocess.on('exit', code => {
+-   if (this.#subprocessStarted && typeof code === 'number' && code !== 0) {
+-     this.childManager.close()
+-     process.exit(code)
+-   }
+- })
 + this.subprocess.on('exit', (code, signal) => {
-    if (this.#subprocessStarted && typeof code === 'number' && code !== 0) {
-      this.childManager.close()
-      process.exit(code)
-+   } else if (this.#subprocessStarted && signal) {
-+     this.childManager.close()
-+     process.exit(1)
-    }
-  })
++   if (this.#subprocessStarted) {
++     if (typeof code === 'number' && code !== 0) {
++       this.childManager.close()
++       process.exit(code)
++     } else if (signal) {
++       this.childManager.close()
++       process.exit(1)
++     }
++   }
++ })
 ```
 
-This collapses the unhealthy-detection window from `maxUnhealthyChecks * interval` (minutes) to ~1 second for any signal-based death, which is what the surrounding comment ("terminate the thread with the same code") already promises.
+This collapses the unhealthy-detection window from `maxUnhealthyChecks * interval` (minutes) to ~1 second for any signal-based death. Exact shape is up to the maintainers.
 
 ## Impact
 
